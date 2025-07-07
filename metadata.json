@@ -1,0 +1,5 @@
+{
+  "name": "Route Insight: TSP Visualizer",
+  "description": "An interactive web application that visualizes the complex calculation process of the Traveling Salesperson Problem (TSP) using algorithms like Dynamic Programming (Held-Karp) and Nearest Neighbor. Users can see how optimal routes are found step-by-step.",
+  "requestFramePermissions": []
+}
