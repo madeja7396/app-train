@@ -1,0 +1,15 @@
+# === Large model checkpoints ===
+models/
+*.bin
+*.pt
+*.safetensors
+
+# === Python cache / build ===
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+
+# === Raw data ===
+data/raw/
