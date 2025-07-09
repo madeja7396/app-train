@@ -13,3 +13,6 @@ dist/
 
 # === Raw data ===
 data/raw/
+
+# === Vector Store ===
+lancedb/
