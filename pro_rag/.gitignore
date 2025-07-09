@@ -16,3 +16,6 @@ data/raw/
 
 # === Vector Store ===
 lancedb/
+
+# === Processed data ===
+scripts/data/
