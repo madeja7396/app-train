@@ -1,37 +1,22 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-query.py — Retrieval-Augmented QA CLI  (Qwen3 対応, 改良版)
-
-例
----
-python scripts/query.py \
-    --db_path   ~/rag_vector_store \
-    --model_dir models/qwen3-0.6B \
-    --quant     4bit \
-    --k         4 \
-    --thinking  on
+query.py — Retrieval-Augmented QA CLI (Qwen3 対応, 改良版)
 """
-
 from __future__ import annotations
 import argparse, textwrap, sys, warnings
 from pathlib import Path
-from typing import List
+import yaml
 
 import lancedb, pandas as pd
-from sentence_transformers import SentenceTransformer
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
 )
+from embed import embed_texts
 
-# ─────────── Embedding util ───────────
-_ENCODER = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-def embed(texts: List[str]) -> List[List[float]]:
-    return _ENCODER.encode(texts, normalize_embeddings=True).tolist()
 
-# ─────────── Qwen3 loader ─────────────
 def load_qwen(model_dir: str | Path, quant: str = "fp16"):
     kwargs = {"trust_remote_code": True}
     if quant in {"4bit", "8bit"}:
@@ -49,26 +34,20 @@ def load_qwen(model_dir: str | Path, quant: str = "fp16"):
     )
     return tok, mdl
 
-# ─────────── RAG QA main ──────────────
-SYSTEM_MSG = (
-    "あなたは社内ナレッジ QA アシスタントです。\n"
-    "1️⃣ 回答は **50 字以内** に要約。\n"
-    "2️⃣ 根拠が無ければ『情報不足です』のみ返答。\n"
-    "3️⃣ 出力は Markdown 箇条書きで最大 3 行。"
-)
 
 def qa(
     question: str,
     tbl,
     tok,
     mdl,
+    system_msg: str,
     k: int = 4,
     thinking: bool = True,
     sample: bool = True,
     max_new_tokens: int = 256,
 ):
     # ① similarity search
-    vec = embed([question])[0]
+    vec = embed_texts([question])[0]
     ctx_df: pd.DataFrame = (
         tbl.search(vec).limit(k).select(["text", "source"]).to_pandas()
     )
@@ -76,7 +55,7 @@ def qa(
 
     # ② prompt
     msgs = [
-        {"role": "system", "content": SYSTEM_MSG},
+        {"role": "system", "content": system_msg},
         {
             "role": "user",
             "content": f"### 質問\n{question}\n\n### コンテキスト\n{context}",
@@ -94,13 +73,17 @@ def qa(
     gen_kwargs = dict(max_new_tokens=max_new_tokens, eos_token_id=tok.eos_token_id)
     if sample:
         gen_kwargs.update(dict(do_sample=True, temperature=0.7, top_p=0.9, top_k=20))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        out = mdl.generate(**inputs, **gen_kwargs)
-    resp_ids = out[0][inputs["input_ids"].shape[-1] :]
-    text = tok.decode(resp_ids, skip_special_tokens=True).strip()
 
-    # strip <think> block
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = mdl.generate(**inputs, **gen_kwargs)
+        resp_ids = out[0][inputs["input_ids"].shape[-1] :]
+        text = tok.decode(resp_ids, skip_special_tokens=True).strip()
+    except Exception as e:
+        print(f"⚠️ モデル生成中にエラーが発生しました: {e}", file=sys.stderr)
+        return "モデルの生成中にエラーが発生しました。"
+
     if "<think>" in text:
         try:
             text = text.split("</think>")[-1].strip()
@@ -108,10 +91,11 @@ def qa(
             pass
     return text
 
-# ─────────── CLI setup ────────────────
+
 def build_parser():
     ap = argparse.ArgumentParser(description="RAG CLI (Qwen3)")
     ap.add_argument("--db_path", type=Path, required=True, help="LanceDB path")
+    ap.add_argument("--config", type=Path, default="configs/rag.yaml", help="Config file")
     ap.add_argument("--table", default="docs", help="LanceDB table name")
     ap.add_argument("--model_dir", required=True, help="Local dir or HF repo ID")
     ap.add_argument("--quant", choices=["fp16", "8bit", "4bit"], default="fp16")
@@ -119,8 +103,13 @@ def build_parser():
     ap.add_argument("--thinking", choices=["on", "off"], default="on")
     return ap
 
+
 def main():
     args = build_parser().parse_args()
+
+    with open(args.config, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
     db = lancedb.connect(str(args.db_path))
     if args.table not in db.table_names():
         sys.exit(f"❌ table '{args.table}' not found in {args.db_path}")
@@ -142,12 +131,14 @@ def main():
             tbl,
             tok,
             mdl,
+            system_msg=config["system_prompt"],
             k=args.k,
             thinking=(args.thinking == "on"),
             sample=True,
         )
         print("\n--- 回答 ---")
         print(textwrap.fill(ans, 120))
+
 
 if __name__ == "__main__":
     main()
