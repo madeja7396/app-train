@@ -1,0 +1,5 @@
+{
+  "name": "AI Paper Reading Assistant",
+  "description": "An application to assist with reading and understanding academic papers using AI. Upload a PDF to translate, explain terms, and take notes in an interactive, three-pane layout.",
+  "requestFramePermissions": []
+}
